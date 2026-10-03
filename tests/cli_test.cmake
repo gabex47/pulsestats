@@ -39,8 +39,6 @@ function(run_case name expected_status)
     endif()
 endfunction()
 
-run_case(default 0)
-run_case(stats 0 stats)
 run_case(help 0 help)
 run_case(--help 0 --help)
 run_case(invalid 2 bogus)

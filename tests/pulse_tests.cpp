@@ -1,11 +1,13 @@
 #include "pulse/display.hpp"
 #include "pulse/stats.hpp"
+#include "pulse/terminal.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -43,11 +45,12 @@ int main() {
     sample.memory = pulse::Usage{5 * gib, 8 * gib};
     sample.disk = pulse::Usage{113 * gib, 228 * gib};
     std::string output = pulse::render_stats(sample);
-    passed &= require(contains(output, "CPU      23%"), "CPU formatting failed");
+    passed &= require(contains(output, "CPU      [####............]  23%"),
+                      "CPU formatting failed");
     passed &= require(contains(output, "TEMP     N/A"), "Temperature fallback failed");
-    passed &= require(contains(output, "MEMORY   5.0 GiB / 8.0 GiB  (63%)"),
+    passed &= require(contains(output, "MEMORY   [##########......]  63%  5.0 / 8.0 GiB"),
                       "Memory formatting failed");
-    passed &= require(contains(output, "DISK     113.0 GiB / 228.0 GiB  (50%)  (startup)"),
+    passed &= require(contains(output, "DISK     [########........]  50%  113.0 / 228.0 GiB  (startup)"),
                       "Disk formatting failed");
     passed &= require(contains(output, "GPU      N/A"), "GPU fallback failed");
 
@@ -55,7 +58,7 @@ int main() {
     sample.memory = pulse::Usage{9 * gib, 8 * gib};
     sample.disk = std::nullopt;
     output = pulse::render_stats(sample);
-    passed &= require(contains(output, "CPU      N/A"), "Unavailable CPU fallback failed");
+    passed &= require(contains(output, "CPU      N/A\n"), "Unavailable CPU fallback failed");
     passed &= require(contains(output, "MEMORY   N/A"), "Invalid memory fallback failed");
     passed &= require(contains(output, "DISK     N/A\n"), "Unavailable disk fallback failed");
     passed &= require(!contains(output, "(startup)"), "Unavailable disk has startup label");
@@ -70,7 +73,7 @@ int main() {
     sample.memory = pulse::Usage{256 * mib, 512 * mib};
     sample.disk = pulse::Usage{0, 0};
     output = pulse::render_stats(sample);
-    passed &= require(contains(output, "MEMORY   256.0 MiB / 512.0 MiB  (50%)"),
+    passed &= require(contains(output, "MEMORY   [########........]  50%  256.0 / 512.0 MiB"),
                       "MiB formatting failed");
     passed &= require(contains(output, "DISK     N/A\n"), "Zero disk total fallback failed");
 
@@ -88,6 +91,27 @@ int main() {
         passed &= require(contains(pulse::render_stats(sample), "TEMP     N/A"),
                           "Non-finite temperature fallback failed");
     }
+
+    std::ostringstream terminal_output;
+    {
+        pulse::TerminalScreen terminal(terminal_output);
+        terminal.draw("first\nstale\n");
+        terminal.draw("second\n");
+    }
+    passed &= require(terminal_output.str() ==
+                          "\x1b[?1049h\x1b[?25l"
+                          "\x1b[H\x1b[2Kfirst\x1b[E\x1b[2Kstale\x1b[J"
+                          "\x1b[H\x1b[2Ksecond\x1b[J"
+                          "\x1b[?25h\x1b[?1049l",
+                      "Terminal redraw or cleanup failed");
+
+    std::ostringstream interrupted_output;
+    {
+        pulse::TerminalScreen terminal(interrupted_output);
+        interrupted_output.setstate(std::ios::badbit);
+    }
+    passed &= require(contains(interrupted_output.str(), "\x1b[?25h\x1b[?1049l"),
+                      "Terminal cleanup was suppressed by a stream error");
 
     const pulse::SystemStats live = pulse::collect_system_stats();
     passed &= require(live.memory.has_value(), "Memory statistics unavailable");
