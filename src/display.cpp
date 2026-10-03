@@ -64,11 +64,11 @@ std::string render_stats(const SystemStats& stats) {
     append_row(output, "CPU", format_percent(stats.cpu_percent));
     append_row(output, "TEMP", format_temperature(stats.temperature_celsius));
     append_row(output, "MEMORY", format_usage(stats.memory));
-    std::string disk = format_usage(stats.disk);
-    if (disk != "N/A") {
-        disk += "  (startup)";
+    if (stats.disk && usage_percent(*stats.disk)) {
+        append_row(output, "DISK", format_usage(stats.disk) + "  (startup)");
+    } else {
+        append_row(output, "DISK", "N/A");
     }
-    append_row(output, "DISK", disk);
     append_row(output, "GPU", format_percent(stats.gpu_percent));
     return output.str();
 }

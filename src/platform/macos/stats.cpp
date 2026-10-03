@@ -30,8 +30,9 @@ std::optional<double> cpu_usage(const host_cpu_load_info_data_t& before,
     std::uint64_t idle = 0;
     for (int state = 0; state < CPU_STATE_MAX; ++state) {
         // Mach CPU ticks are 32-bit counters; unsigned subtraction handles wraparound.
-        const auto delta = static_cast<std::uint32_t>(
-            after.cpu_ticks[state] - before.cpu_ticks[state]);
+        const std::uint32_t previous = before.cpu_ticks[state];
+        const std::uint32_t current = after.cpu_ticks[state];
+        const std::uint32_t delta = current - previous;
         total += delta;
         if (state == CPU_STATE_IDLE) {
             idle = delta;
@@ -79,6 +80,9 @@ std::optional<Usage> memory_usage(const host_t host) {
 std::optional<Usage> disk_usage() {
     struct statfs fs {};
     if (statfs("/", &fs) != 0 || fs.f_bsize == 0 || fs.f_blocks == 0 ||
+        fs.f_bsize == std::numeric_limits<decltype(fs.f_bsize)>::max() ||
+        fs.f_blocks == std::numeric_limits<decltype(fs.f_blocks)>::max() ||
+        fs.f_bavail == std::numeric_limits<decltype(fs.f_bavail)>::max() ||
         fs.f_bavail > fs.f_blocks ||
         fs.f_blocks > std::numeric_limits<std::uint64_t>::max() / fs.f_bsize) {
         return std::nullopt;

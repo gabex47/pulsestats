@@ -1,22 +1,29 @@
 # Pulse
 
-Pulse is an open-source, lightweight native terminal utility for system information. It is currently beginning Phase 1 of development.
+Pulse is an open-source, lightweight native terminal utility for a quick system statistics snapshot. It is currently supported and tested on macOS with Apple Silicon.
+
+Requirements: macOS, CMake 3.20 or newer, and a C++17 compiler (such as Apple Clang from Xcode Command Line Tools). No third-party libraries are needed.
 
 ## Build
 
-On macOS, with CMake and a C++17 compiler:
-
 ```sh
-cmake -S . -B build
-cmake --build build
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
 ```
 
-## Run
+## Test
 
 ```sh
-./build/pulse
-./build/pulse stats
-./build/pulse help
+ctest --test-dir build-release --output-on-failure
 ```
 
-Run `ctest --test-dir build --output-on-failure` to run the tests.
+## Use
+
+```sh
+./build-release/pulse
+./build-release/pulse stats
+./build-release/pulse help
+./build-release/pulse --help
+```
+
+Pulse reports overall CPU usage, used and total memory, and space used on the startup volume. Memory used is estimated from active, wired, and physically compressed pages; it may differ from Activity Monitor. Disk used means total capacity minus space available to the user, which can include APFS reserved space. Temperature and system-wide GPU usage show `N/A` when a reliable numeric reading is unavailable.
