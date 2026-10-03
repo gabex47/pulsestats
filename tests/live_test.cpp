@@ -8,6 +8,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -21,7 +22,8 @@ std::size_t occurrences(const std::string& text, const std::string_view token) {
     return count;
 }
 
-bool run_live(const char* binary, const char* command, const bool interrupt_early) {
+bool run_live(const char* binary, const std::vector<const char*>& arguments,
+              const int frames_before_interrupt) {
     int output_pipe[2];
     if (pipe(output_pipe) != 0) {
         std::cerr << "Could not create output pipe\n";
@@ -42,11 +44,13 @@ bool run_live(const char* binary, const char* command, const bool interrupt_earl
             _exit(127);
         }
         close(output_pipe[1]);
-        if (command == nullptr) {
-            execl(binary, binary, static_cast<char*>(nullptr));
-        } else {
-            execl(binary, binary, command, static_cast<char*>(nullptr));
+        std::vector<char*> child_args;
+        child_args.push_back(const_cast<char*>(binary));
+        for (const char* argument : arguments) {
+            child_args.push_back(const_cast<char*>(argument));
         }
+        child_args.push_back(nullptr);
+        execv(binary, child_args.data());
         _exit(127);
     }
 
@@ -79,9 +83,10 @@ bool run_live(const char* binary, const char* command, const bool interrupt_earl
             }
         }
 
-        const bool ready_to_interrupt = interrupt_early
+        const bool ready_to_interrupt = frames_before_interrupt == 0
             ? occurrences(output, "\x1b[?25l") >= 1
-            : occurrences(output, "\x1b[H\x1b[2K") >= 2;
+            : occurrences(output, "\x1b[H\x1b[2K") >=
+                  static_cast<std::size_t>(frames_before_interrupt);
         if (!sent_interrupt && ready_to_interrupt) {
             if (kill(child, SIGINT) != 0) {
                 error = "Pulse exited before SIGINT";
@@ -121,7 +126,8 @@ bool run_live(const char* binary, const char* command, const bool interrupt_earl
     if (error.empty() &&
         (occurrences(output, "\x1b[?1049h") != 1 ||
          occurrences(output, "\x1b[?25l") != 1 ||
-         (!interrupt_early && occurrences(output, "\x1b[H\x1b[2K") < 2) ||
+         (frames_before_interrupt > 0 && occurrences(output, "\x1b[H\x1b[2K") <
+              static_cast<std::size_t>(frames_before_interrupt)) ||
          occurrences(output, "\x1b[?25h") != 1 ||
          occurrences(output, "\x1b[?1049l") != 1)) {
         error = "Redraw or terminal cleanup sequences are missing";
@@ -130,14 +136,26 @@ bool run_live(const char* binary, const char* command, const bool interrupt_earl
     if (error.empty() &&
         (output.size() < cleanup.size() ||
          output.compare(output.size() - cleanup.size(), cleanup.size(), cleanup) != 0 ||
-         (!interrupt_early &&
+         (frames_before_interrupt >= 2 &&
           output.find("Ctrl+C to exit\x1b[J\x1b[H") == std::string::npos))) {
         error = "Frame boundary or final terminal state is incorrect";
     }
-    if (error.empty() && !interrupt_early &&
+    if (error.empty() && frames_before_interrupt > 0 &&
         (output.find("CPU      ") == std::string::npos ||
          output.find("Ctrl+C to exit") == std::string::npos)) {
         error = "Live statistics were not displayed";
+    }
+    if (error.empty() && frames_before_interrupt > 0 && arguments.size() >= 2 &&
+        (std::string_view(arguments[0]) == "-i" ||
+         std::string_view(arguments[0]) == "--interval") &&
+        output.find(std::string("Refresh ") + arguments[1] + "s") == std::string::npos) {
+        error = "Requested refresh interval was not displayed";
+    }
+    if (error.empty() && frames_before_interrupt > 0 && arguments.size() >= 3 &&
+        (std::string_view(arguments[1]) == "-i" ||
+         std::string_view(arguments[1]) == "--interval") &&
+        output.find(std::string("Refresh ") + arguments[2] + "s") == std::string::npos) {
+        error = "Requested refresh interval was not displayed";
     }
     if (!error.empty()) {
         std::cerr << error << '\n';
@@ -149,11 +167,20 @@ bool run_live(const char* binary, const char* command, const bool interrupt_earl
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 2 && argc != 3) {
-        std::cerr << "Expected Pulse binary and optional command\n";
+    if (argc < 2) {
+        std::cerr << "Expected Pulse binary and optional arguments\n";
         return 1;
     }
     const bool interrupt_early = argc == 3 && std::string_view(argv[2]) == "--early";
-    const char* command = argc == 3 && !interrupt_early ? argv[2] : nullptr;
-    return run_live(argv[1], command, interrupt_early) ? 0 : 1;
+    const bool interrupt_after_one = argc == 3 && std::string_view(argv[2]) == "--long";
+    std::vector<const char*> arguments;
+    if (interrupt_after_one) {
+        arguments = {"--interval", "60"};
+    } else if (!interrupt_early) {
+        for (int index = 2; index < argc; ++index) {
+            arguments.push_back(argv[index]);
+        }
+    }
+    return run_live(argv[1], arguments, interrupt_early ? 0 : interrupt_after_one ? 1 : 2)
+               ? 0 : 1;
 }

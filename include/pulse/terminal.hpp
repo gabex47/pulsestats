@@ -1,9 +1,17 @@
 #pragma once
 
+#include <cstddef>
 #include <iosfwd>
 #include <string_view>
 
 namespace pulse {
+
+struct TerminalSize {
+    std::size_t columns;
+    std::size_t rows;
+};
+
+TerminalSize terminal_size();
 
 class TerminalScreen {
 public:

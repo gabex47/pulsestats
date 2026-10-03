@@ -1,6 +1,6 @@
 # Pulse
 
-Pulse is an open-source, lightweight native terminal system monitor. It is currently supported and tested on macOS with Apple Silicon.
+Pulse v0.1.3 is an open-source, lightweight native terminal system monitor for macOS on Apple Silicon. It presents a live, resize-aware dashboard without a background service or third-party dependencies.
 
 Requirements: macOS, CMake 3.20 or newer, and a C++17 compiler (such as Apple Clang from Xcode Command Line Tools). No third-party libraries are needed.
 
@@ -22,10 +22,13 @@ ctest --test-dir build-release --output-on-failure
 ```sh
 ./build-release/pulse
 ./build-release/pulse stats
+./build-release/pulse --interval 0.5
+./build-release/pulse stats -i 2
 ./build-release/pulse help
 ./build-release/pulse --help
+./build-release/pulse --version
 ```
 
-`pulse` and `pulse stats` refresh in place about every 500 ms. Press Ctrl+C to exit.
+The dashboard refreshes in place every second by default. `-i` / `--interval` accepts 0.25–60 seconds. Press Ctrl+C to exit; Pulse restores the original terminal screen and cursor.
 
-Pulse reports overall CPU usage, used and total memory, and space used on the startup volume. Memory used is estimated from active, wired, and physically compressed pages; it may differ from Activity Monitor. Disk used means total capacity minus space available to the user, which can include APFS reserved space. Temperature and system-wide GPU usage show `N/A` when a reliable numeric reading is unavailable.
+Pulse shows device and OS details when available, plus CPU usage, memory, startup-volume storage, battery state on portable Macs, load averages, and process count. Memory used is estimated from active, wired, and physically compressed pages; “RAM left” is total minus that estimate, not Activity Monitor's available-memory figure. Disk used is total capacity minus space available to the user, which can include APFS reserved space. Process count may show `N/A` if macOS denies enumeration; uptime is omitted when boot time is unavailable. Temperature and system-wide GPU utilization remain `N/A` without reliable readings.

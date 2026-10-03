@@ -1,8 +1,20 @@
 #include "pulse/terminal.hpp"
 
+#include <sys/ioctl.h>
+#include <unistd.h>
+
 #include <ostream>
 
 namespace pulse {
+
+TerminalSize terminal_size() {
+    winsize dimensions{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &dimensions) == 0 &&
+        dimensions.ws_col > 0 && dimensions.ws_row > 0) {
+        return {dimensions.ws_col, dimensions.ws_row};
+    }
+    return {80, 24};
+}
 
 TerminalScreen::TerminalScreen(std::ostream& output) : output_(output) {
     // The alternate screen preserves the shell's scrollback and cursor position.
