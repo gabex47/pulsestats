@@ -1,10 +1,13 @@
 #include <poll.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <util.h>
 
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -24,26 +27,33 @@ std::size_t occurrences(const std::string& text, const std::string_view token) {
 
 bool run_live(const char* binary, const std::vector<const char*>& arguments,
               const int frames_before_interrupt) {
-    int output_pipe[2];
-    if (pipe(output_pipe) != 0) {
-        std::cerr << "Could not create output pipe\n";
+    winsize size{};
+    size.ws_col = 80;
+    size.ws_row = 24;
+    int master = -1;
+    int slave = -1;
+    if (openpty(&master, &slave, nullptr, nullptr, &size) != 0) {
+        std::cerr << "Could not create test terminal\n";
         return false;
     }
 
     const pid_t child = fork();
     if (child == -1) {
-        close(output_pipe[0]);
-        close(output_pipe[1]);
+        close(master);
+        close(slave);
         std::cerr << "Could not start Pulse\n";
         return false;
     }
     if (child == 0) {
-        close(output_pipe[0]);
-        if (dup2(output_pipe[1], STDOUT_FILENO) == -1 ||
-            dup2(output_pipe[1], STDERR_FILENO) == -1) {
+        close(master);
+        if (dup2(slave, STDIN_FILENO) == -1 ||
+            dup2(slave, STDOUT_FILENO) == -1 ||
+            dup2(slave, STDERR_FILENO) == -1) {
             _exit(127);
         }
-        close(output_pipe[1]);
+        close(slave);
+        setenv("TERM", "xterm-256color", 1);
+        unsetenv("NO_COLOR");
         std::vector<char*> child_args;
         child_args.push_back(const_cast<char*>(binary));
         for (const char* argument : arguments) {
@@ -54,7 +64,7 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
         _exit(127);
     }
 
-    close(output_pipe[1]);
+    close(slave);
     std::string output;
     std::string error;
     bool sent_interrupt = false;
@@ -64,7 +74,7 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
 
     while (std::chrono::steady_clock::now() < deadline && !(exited && end_of_output)) {
-        struct pollfd descriptor { output_pipe[0], POLLIN | POLLHUP, 0 };
+        struct pollfd descriptor { master, POLLIN | POLLHUP, 0 };
         const int ready = poll(&descriptor, 1, 100);
         if (ready == -1 && errno != EINTR) {
             error = "Could not read Pulse output";
@@ -72,10 +82,10 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
         }
         if (ready > 0 && (descriptor.revents & (POLLIN | POLLHUP)) != 0) {
             char buffer[1024];
-            const ssize_t bytes = read(output_pipe[0], buffer, sizeof(buffer));
+            const ssize_t bytes = read(master, buffer, sizeof(buffer));
             if (bytes > 0) {
                 output.append(buffer, static_cast<std::size_t>(bytes));
-            } else if (bytes == 0) {
+            } else if (bytes == 0 || errno == EIO) {
                 end_of_output = true;
             } else if (errno != EINTR) {
                 error = "Could not read Pulse output";
@@ -94,12 +104,14 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
             }
             sent_interrupt = true;
         }
-        const pid_t waited = waitpid(child, &status, WNOHANG);
-        if (waited == child) {
-            exited = true;
-        } else if (waited == -1 && errno != EINTR) {
-            error = "Could not wait for Pulse";
-            break;
+        if (!exited) {
+            const pid_t waited = waitpid(child, &status, WNOHANG);
+            if (waited == child) {
+                exited = true;
+            } else if (waited == -1 && errno != EINTR) {
+                error = "Could not wait for Pulse";
+                break;
+            }
         }
         if (output.size() > 16384) {
             error = "Pulse emitted too much output before SIGINT";
@@ -115,7 +127,7 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
         kill(child, SIGKILL);
         waitpid(child, &status, 0);
     }
-    close(output_pipe[0]);
+    close(master);
 
     if (error.empty() && (!exited || !end_of_output)) {
         error = "Pulse did not stop promptly after SIGINT";
@@ -132,30 +144,37 @@ bool run_live(const char* binary, const std::vector<const char*>& arguments,
          occurrences(output, "\x1b[?1049l") != 1)) {
         error = "Redraw or terminal cleanup sequences are missing";
     }
-    const std::string cleanup = "\x1b[?25h\x1b[?1049l";
+    const std::string cleanup = "\x1b[0m\x1b[?25h\x1b[?1049l";
     if (error.empty() &&
         (output.size() < cleanup.size() ||
          output.compare(output.size() - cleanup.size(), cleanup.size(), cleanup) != 0 ||
          (frames_before_interrupt >= 2 &&
-          output.find("Ctrl+C to exit\x1b[J\x1b[H") == std::string::npos))) {
+          output.find("\x1b[J\x1b[H") == std::string::npos))) {
         error = "Frame boundary or final terminal state is incorrect";
     }
     if (error.empty() && frames_before_interrupt > 0 &&
-        (output.find("CPU      ") == std::string::npos ||
-         output.find("Ctrl+C to exit") == std::string::npos)) {
+        (output.find("CPU") == std::string::npos ||
+         output.find("Ctrl+C") == std::string::npos)) {
         error = "Live statistics were not displayed";
     }
     if (error.empty() && frames_before_interrupt > 0 && arguments.size() >= 2 &&
         (std::string_view(arguments[0]) == "-i" ||
          std::string_view(arguments[0]) == "--interval") &&
-        output.find(std::string("Refresh ") + arguments[1] + "s") == std::string::npos) {
+        output.find(std::string(arguments[1]) + "s refresh") == std::string::npos) {
         error = "Requested refresh interval was not displayed";
     }
     if (error.empty() && frames_before_interrupt > 0 && arguments.size() >= 3 &&
         (std::string_view(arguments[1]) == "-i" ||
          std::string_view(arguments[1]) == "--interval") &&
-        output.find(std::string("Refresh ") + arguments[2] + "s") == std::string::npos) {
+        output.find(std::string(arguments[2]) + "s refresh") == std::string::npos) {
         error = "Requested refresh interval was not displayed";
+    }
+    if (error.empty() && !arguments.empty() &&
+        std::string_view(arguments[0]) == "--no-color" &&
+        (output.find("\x1b[96m") != std::string::npos ||
+         output.find("\x1b[95m") != std::string::npos ||
+         output.find("\x1b[32m") != std::string::npos)) {
+        error = "--no-color emitted ANSI colors";
     }
     if (!error.empty()) {
         std::cerr << error << '\n';

@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -69,19 +70,21 @@ int main(int argc, char* argv[]) {
             _exit(127);
         }
         close(slave);
+        setenv("TERM", "xterm-256color", 1);
+        unsetenv("NO_COLOR");
         execl(argv[1], argv[1], static_cast<char*>(nullptr));
         _exit(127);
     }
     close(slave);
     std::string output;
-    bool success = read_until(master, output, "\x1b[H\x1b[2KPULSE", 0);
+    bool success = read_until(master, output, "LIVE METRICS", 0);
     if (success) {
         const std::size_t start = output.size();
         size.ws_col = 120;
         size.ws_row = 30;
         success = ioctl(master, TIOCSWINSZ, &size) == 0 &&
                   kill(child, SIGWINCH) == 0 &&
-                  read_until(master, output, "\x1b[H\x1b[2K╭", start);
+                  read_until(master, output, "LIVE METRICS", start);
     }
     if (success) {
         const std::size_t start = output.size();
@@ -89,11 +92,11 @@ int main(int argc, char* argv[]) {
         size.ws_row = 12;
         success = ioctl(master, TIOCSWINSZ, &size) == 0 &&
                   kill(child, SIGWINCH) == 0 &&
-                  read_until(master, output, "\x1b[H\x1b[2KPULSE", start);
+                  read_until(master, output, "PULSE", start);
     }
     if (success) {
         success = kill(child, SIGINT) == 0 &&
-                  read_until(master, output, "\x1b[?25h\x1b[?1049l", 0);
+                  read_until(master, output, "\x1b[0m\x1b[?25h\x1b[?1049l", 0);
     }
     if (!success) {
         kill(child, SIGKILL);

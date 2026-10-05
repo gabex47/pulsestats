@@ -17,7 +17,6 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -251,11 +250,9 @@ SystemInfo collect_system_info() {
     if (shell && *shell) {
         info.shell = shell;
     }
+    // TERM describes capabilities (for example, xterm-256color), not the emulator.
     const char* term = std::getenv("TERM_PROGRAM");
-    if (!term || !*term) {
-        term = std::getenv("TERM");
-    }
-    if (term && *term && std::string_view(term) != "dumb") {
+    if (term && *term) {
         info.terminal = term;
     }
     return info;

@@ -11,7 +11,14 @@ struct TerminalSize {
     std::size_t rows;
 };
 
+struct TerminalCapabilities {
+    bool interactive;
+    bool color;
+    bool unicode;
+};
+
 TerminalSize terminal_size();
+TerminalCapabilities terminal_capabilities(bool no_color_option);
 
 class TerminalScreen {
 public:

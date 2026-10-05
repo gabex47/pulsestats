@@ -71,11 +71,13 @@ bool install_handlers() {
 
 void wait_until(const std::chrono::steady_clock::time_point deadline,
                 pulse::TerminalScreen& screen, const pulse::SystemInfo& info,
-                const pulse::SystemStats& stats, const double interval) {
+                const pulse::SystemStats& stats, const double interval,
+                const pulse::RenderOptions options) {
     while (stop_signal == 0) {
         if (resized != 0) {
             resized = 0;
-            screen.draw(pulse::render_dashboard(info, stats, pulse::terminal_size(), interval));
+            screen.draw(pulse::render_dashboard(info, stats, pulse::terminal_size(), interval,
+                                                options));
         }
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now()).count();
@@ -89,7 +91,7 @@ void wait_until(const std::chrono::steady_clock::time_point deadline,
     }
 }
 
-int run_live(const double interval_seconds) {
+int run_live(const double interval_seconds, const pulse::RenderOptions options) {
     if (!install_handlers()) {
         std::cerr << "Pulse: unable to install signal handlers.\n";
         return 1;
@@ -106,8 +108,8 @@ int run_live(const double interval_seconds) {
         }
         resized = 0;
         screen.draw(pulse::render_dashboard(info, stats, pulse::terminal_size(),
-                                            interval_seconds));
-        wait_until(deadline, screen, info, stats, interval_seconds);
+                                            interval_seconds, options));
+        wait_until(deadline, screen, info, stats, interval_seconds, options);
     }
     return stop_signal == SIGINT || stop_signal == 0 ? 0 : 128 + stop_signal;
 }
@@ -141,8 +143,14 @@ int main(int argc, char* argv[]) {
     }
     double interval_seconds = 1.0;
     bool interval_seen = false;
+    bool no_color = false;
     while (index < argc) {
         const std::string_view argument(argv[index]);
+        if (argument == "--no-color" && !no_color) {
+            no_color = true;
+            ++index;
+            continue;
+        }
         if (argument == "-i" || argument == "--interval") {
             if (interval_seen || index + 1 >= argc ||
                 !parse_interval(argv[index + 1], interval_seconds)) {
@@ -161,5 +169,13 @@ int main(int argc, char* argv[]) {
         }
         return 2;
     }
-    return run_live(interval_seconds);
+    const auto capabilities = pulse::terminal_capabilities(no_color);
+    if (!capabilities.interactive) {
+        const auto info = pulse::collect_system_info();
+        const auto stats = pulse::collect_system_stats();
+        std::cout << pulse::render_dashboard(info, stats, {80, 24}, interval_seconds,
+                                             {false, false, false}) << '\n';
+        return 0;
+    }
+    return run_live(interval_seconds, {capabilities.color, capabilities.unicode, true});
 }

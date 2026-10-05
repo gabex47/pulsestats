@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Pulse VERSION 0.1.3 LANGUAGES CXX)
+project(Pulse VERSION 0.1.4 LANGUAGES CXX)
 
 if(NOT APPLE)
     message(FATAL_ERROR "Pulse currently supports macOS only")
@@ -46,6 +46,7 @@ if(BUILD_TESTING)
     add_test(NAME live_half_second COMMAND pulse_live_tests $<TARGET_FILE:pulse> --interval 0.5)
     add_test(NAME live_quarter_second COMMAND pulse_live_tests $<TARGET_FILE:pulse> stats -i 0.25)
     add_test(NAME live_long_interval_interrupt COMMAND pulse_live_tests $<TARGET_FILE:pulse> --long)
+    add_test(NAME live_no_color COMMAND pulse_live_tests $<TARGET_FILE:pulse> --no-color)
 
     add_executable(pulse_resize_tests tests/resize_test.cpp)
     target_compile_features(pulse_resize_tests PRIVATE cxx_std_17)
